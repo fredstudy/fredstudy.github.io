@@ -1,6 +1,6 @@
 // Admin dashboard (spec 125), demo mode only. All DOM writes go through el()/svgEl() with
 // textContent/setAttribute: data values are never parsed as HTML (security update 28.10).
-import { fixedCostForMonth, fixedCostOfRow, ratio, fmtUsd, failPct, fmtPct, minutesAgoText, fmtDuration, monthOf, KIND, STATUS, PUSH, EVENT, PLAT, label, alertText } from './calc.mjs';
+import { fixedCostForMonth, fixedCostOfRow, ratio, fmtUsd, fmtUsdAxis, axisLabels, failPct, fmtPct, minutesAgoText, fmtDuration, monthOf, KIND, STATUS, PUSH, EVENT, PLAT, label, alertText } from './calc.mjs';
 import { demoData } from './demo-data.mjs';
 import { supabaseConfig } from './config.mjs';
 
@@ -96,10 +96,10 @@ async function signOut() {
 
 /* ---------- charts ---------- */
 function axisY(mx, w, h, pad, fmt) {
-  const g = svgEl('g');
+  const g = svgEl('g'), labels = axisLabels(mx, fmt === fmtUsd ? fmtUsdAxis(mx) : fmt);
   for (let t = 0; t <= 3; t++) {
     const v = (mx * t) / 3, y = h - pad.b - (v / mx) * (h - pad.t - pad.b);
-    g.append(svgEl('line', { class: 'gl', x1: pad.l, x2: w - pad.r, y1: y, y2: y }), svgEl('text', { x: pad.l - 6, y: y + 4, 'text-anchor': 'end' }, fmt(v)));
+    g.append(svgEl('line', { class: 'gl', x1: pad.l, x2: w - pad.r, y1: y, y2: y }), svgEl('text', { x: pad.l - 6, y: y + 4, 'text-anchor': 'end' }, labels[t]));
   }
   return g;
 }

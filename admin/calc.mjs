@@ -51,6 +51,25 @@ export function fmtUsd(v) {
   return sign + '$' + a.toFixed(2);
 }
 
+/** A money formatter for a y axis whose top is mx: tiny tops get more decimals ($0.003, not $0.00 twice). */
+export function fmtUsdAxis(mx) {
+  if (!(mx < 0.1)) return fmtUsd;
+  const d = mx >= 0.01 ? 3 : 4;
+  return (v) => (Number.isFinite(v) ? '$' + v.toFixed(d) : '—');
+}
+
+/** The 4 y-axis labels (0, 1/3, 2/3, top); a label equal to the one below it is left empty (Jonathan 30.10). */
+export function axisLabels(mx, fmt) {
+  const out = [];
+  let prev = null;
+  for (let t = 0; t <= 3; t++) {
+    const s = fmt((mx * t) / 3);
+    out.push(s === prev ? '' : s);
+    prev = s;
+  }
+  return out;
+}
+
 /** failed/total as a percent number; null when total is 0. */
 export function failPct(failed, total) {
   if (!Number.isFinite(failed) || !Number.isFinite(total) || total <= 0) return null;
