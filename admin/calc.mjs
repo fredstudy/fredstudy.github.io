@@ -113,7 +113,7 @@ export function label(map, k) {
   return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : String(k);
 }
 
-/** [text, threshold note] of one glance alert (spec 125.16). value may be null (cost with a zero average). */
+/** [text, threshold note] of one glance alert (spec 125.16, 125.28). value may be null (cost with a zero average). */
 export function alertText(a) {
   const v = a && Number.isFinite(a.value) ? a.value : null;
   switch (a && a.kind) {
@@ -127,6 +127,11 @@ export function alertText(a) {
       return ['התראות שלא נמסרו: ' + (v ?? '—') + '%.', 'הסף: ' + a.threshold + '%'];
     case 'rollup_stale':
       return ['סיכום הלילה לא רץ.', ''];
+    case 'ai_global': // 125.28
+      return ['עלות AI של כל המשתמשים ב־24 שעות: ' + (v === null ? '—' : '$' + v.toFixed(2)) + '.',
+        Number.isFinite(a.threshold) ? 'סף ההתראה: $' + a.threshold : ''];
+    case 'pdf_global': // 125.28
+      return ['פתיחות PDF ב־24 שעות: ' + (v ?? '—') + '.', Number.isFinite(a.threshold) ? 'סף ההתראה: ' + a.threshold : ''];
     default:
       return [String(a && a.kind), ''];
   }
