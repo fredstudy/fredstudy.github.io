@@ -1,6 +1,6 @@
 // Admin dashboard (spec 125), demo mode only. All DOM writes go through el()/svgEl() with
 // textContent/setAttribute: data values are never parsed as HTML (security update 28.10).
-import { fixedCostForMonth, fixedCostOfRow, ratio, fmtUsd, fmtUsdAxis, axisLabels, failPct, fmtPct, minutesAgoText, fmtDuration, monthOf, KIND, STATUS, PUSH, EVENT, PLAT, label, alertText } from './calc.mjs';
+import { fixedCostForMonth, fixedCostOfRow, ratio, fmtUsd, fmtUsdAxis, axisLabels, failPct, fmtPct, minutesAgoText, fmtDuration, monthOf, KIND, STATUS, PUSH, EVENT, PLAT, FAIL_CLASS, stickiness, anyCount, label, alertText, FB_KIND, FB_TAG, feedbackRate, feedbackConfigLine } from './calc.mjs';
 import { demoData } from './demo-data.mjs';
 import { supabaseConfig } from './config.mjs';
 
@@ -71,11 +71,12 @@ async function callAdmin(method, query, body) {
 }
 async function loadData(section, days) {
   if (DEMO) {
-    const d = demoData(section, days, { fewUsers: params.get('state') === 'fewusers' });
+    const d = demoData(section, days, { fewUsers: params.get('state') === 'fewusers', stageA: params.get('state') === 'stagea' });
     if (section === 'glance') d.generated_at = new Date(Date.now() - 4 * 60000).toISOString();
     return d;
   }
-  return callAdmin('GET', '?' + new URLSearchParams({ section, days: String(days) }).toString());
+  // feedback_notes reads every stored text and takes no days (138 3.5); the server answers 400 to a days param on it
+  return callAdmin('GET', '?' + new URLSearchParams(section === 'feedback_notes' ? { section } : { section, days: String(days) }).toString());
 }
 /** The one write (125.27): only the contract keys are sent, whatever else the row holds. */
 async function saveFixed(row) {
@@ -90,7 +91,7 @@ async function signIn() {
 async function signOut() {
   const c = sb();
   if (c) await c.auth.signOut();
-  state.glance = null; state.tabData = null; state.fixed = []; state.fixedLoaded = false; state.error = new HttpError(401);
+  state.glance = null; state.tabData = null; state.notes = null; state.fixed = []; state.fixedLoaded = false; state.error = new HttpError(401);
   render();
 }
 
@@ -285,8 +286,24 @@ function usersTab(d, state) {
       card('במה משתמשים (קריאות AI)', hbars(Object.entries(d.use_by_kind).sort((a, b) => b[1] - a[1]).map(([k, v]) => [lab(KIND, k), v]), (v) => v + ' קריאות'))),
     el('div', { class: 'grid2' },
       card('מכשירים וגרסאות', table([{ t: 'מכשיר' }, { t: 'גרסה', n: 1 }, { t: 'מכשירים', n: 1 }], dev)),
-      card('עוד לא קיים', soon(['פעילים ביום ובשבוע, דביקות ושימור', 'שלב ב׳: אות פעילות מהטלפון']))),
+      activeCard(d)),
+    retentionCard(d),
   ];
+}
+/** Stage B (125.11): null `active` until the first ping day was rolled up, so the page goes live by itself once the switch is on. */
+function activeCard(d) {
+  if (!d.active) return card('עוד לא קיים', soon(['פעילים ביום ובשבוע, דביקות ושימור', 'שלב ב׳: אות פעילות מהטלפון']));
+  const count = (v) => String(Math.round(v));
+  return card('פעילים', lines([{ k: 'ביום', c: '--s1', v: d.active.dau }, { k: 'ב־7 ימים', c: '--s2', v: d.active.wau }, { k: 'ב־30 ימים', c: '--s3', v: d.active.mau }], d.days, count, 'פעילים'),
+    el('p', { class: 'small' }, 'דביקות (פעילים ביום מתוך פעילים ב־30 ימים): ', el('span', { class: 'num' }, fmtPct(stickiness(d.active)))));
+}
+function retentionCard(d) {
+  if (!d.retention || !d.retention.length) return null;
+  const n = Math.max(...d.retention.map((r) => r.weeks.length));
+  const heads = [{ t: 'שבוע הצטרפות' }, { t: 'נרשמו', n: 1 }, ...Array.from({ length: n }, (_, k) => ({ t: 'שבוע ' + k, n: 1 }))];
+  return card('שימור לפי שבוע הצטרפות', table(heads, d.retention.map((r) => ({
+    cells: [dm(r.week), r.size, ...Array.from({ length: n }, (_, k) => fmtPct(r.weeks[k]))],
+  }))), el('p', { class: 'small' }, 'אחוז מהנרשמים שפתחו את האפליקציה באותו שבוע. — = אין עדיין נתון.'));
 }
 function healthTab(d, state) {
   const failRows = Object.entries(d.ai_fail_by_status).map(([s, n]) => ({ cells: [lab(STATUS, s), n] }));
@@ -301,12 +318,62 @@ function healthTab(d, state) {
     el('div', { class: 'grid2' },
       card('התראות שנשלחו', table([{ t: 'סוג' }, { t: 'נשלחו', n: 1 }, { t: 'לא נמסרו', n: 1 }, { t: '%', n: 1 }], push)),
       card('שגיאות שרת', hbars(Object.entries(d.server_events).map(([k, v]) => [lab(EVENT, k), v]), String))),
-    card('עוד לא קיים', soon(['כשלי רענון והורדה', 'שלב ב׳: מונה מהטלפון'], ['קריסות', 'שלב ג׳: Sentry'])),
+    phoneCountsCard(d),
+    card('עוד לא קיים', phoneCountsOn(d) ? soon(['קריסות', 'שלב ג׳: Sentry']) : soon(['כשלי רענון והורדה', 'שלב ב׳: מונה מהטלפון'], ['קריסות', 'שלב ג׳: Sentry'])),
+  ];
+}
+const phoneCountsOn = (d) => !!(d.refresh && d.download) && anyCount(d.refresh.ok, d.refresh.fail, d.download.ok, d.download.fail);
+/** Stage B (125.12): the counters of finished days; a phone closed for days sends a sum, so a day is an approximation. */
+function phoneCountsCard(d) {
+  if (!phoneCountsOn(d)) return null;
+  const count = (v) => String(Math.round(v));
+  const classes = Object.entries(d.refresh.by_class).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ cells: [lab(FAIL_CLASS, k), v] }));
+  return el('div', { class: 'grid2' },
+    card('רענונים מהטלפון', stacked([{ k: 'הצליחו', c: '--s1', v: d.refresh.ok }, { k: 'נכשלו', c: '--s2', v: d.refresh.fail }], d.days, count, 'רענונים'),
+      classes.length ? table([{ t: 'סיבת כישלון' }, { t: 'מספר', n: 1 }], classes) : null),
+    card('הורדות קבצים מהטלפון', stacked([{ k: 'הצליחו', c: '--s1', v: d.download.ok }, { k: 'נכשלו', c: '--s2', v: d.download.fail }], d.days, count, 'הורדות'),
+      el('p', { class: 'small' }, 'טלפון שהיה סגור כמה ימים שולח סכום ביום אחד, ולכן זה קירוב.')));
+}
+/** Who sent a text (Jonathan 5.11.2026, migration 20261101540000): community nickname, track, year; a missing part is "לא ידוע". */
+function whoText(x) {
+  const part = (v) => (typeof v === 'string' && v.trim() ? v : 'לא ידוע');
+  return part(x.name) + ' · ' + part(x.track) + ' · ' + part(x.year);
+}
+/** The texts card (138 3.5): textContent only, through el(); no link, no HTML. A failed or missing fetch shows one line, never breaks the tab. */
+function notesCard(notes) {
+  const title = 'מה כתבו (הטקסטים האחרונים)';
+  if (!notes || notes.error) return card(title, el('p', { class: 'small' }, 'לא הצלחתי לטעון את הטקסטים' + (notes && notes.error && notes.error.status ? ' (קוד ' + notes.error.status + ')' : '') + '. שאר הלשונית לא מושפעת.'));
+  const list = Array.isArray(notes.recent_notes) ? notes.recent_notes : [];
+  if (!list.length) return card(title, el('p', { class: 'small' }, 'עוד אין טקסטים.'));
+  return card(title, table([{ t: 'יום' }, { t: 'מי (כינוי · מסלול · שנה)' }, { t: 'סוג' }, { t: 'דירוג', n: 1 }, { t: 'תגיות' }, { t: 'גרסה' }, { t: 'מה נכתב' }],
+    list.map((x) => ({ cells: [dm(x.day), whoText(x), lab(FB_KIND, x.kind), x.rating === null || x.rating === undefined ? '—' : x.rating + '/5',
+      (Array.isArray(x.tags) ? x.tags : []).map((t) => lab(FB_TAG, t)).join(', ') || '—', x.app_version, el('td', { class: 'note' }, String(x.note ?? ''))] }))),
+    el('p', { class: 'small' }, 'עד 3 טקסטים לכל סטודנט, עד 50 בסך הכול. ״מי״ הוא כינוי הקהילה שהסטודנט בחר, לא שם אמיתי; בלי פרופיל קהילה כתוב ״לא ידוע״. טקסט של סטודנט מוצג כמו שהוא: לא ללחוץ על כתובות שמופיעות בו.'));
+}
+function appFeedbackView(a, notes) {
+  if (!a) return [];
+  const rate = feedbackRate(a.prompted, a.shown);
+  const kinds = Array.isArray(a.by_kind) ? a.by_kind : [];
+  return [
+    el('h3', { class: 'sec' }, 'משוב מתוך האפליקציה'),
+    el('p', { class: 'small' }, feedbackConfigLine(a.config)),
+    el('div', { class: 'tiles' },
+      tile('מספר דיווחים', String(a.total)),
+      tile('כמה משתמשים דיווחו', String(a.users)),
+      tile('ממוצע דירוג', a.rating_avg === null || a.rating_avg === undefined ? '—' : Number(a.rating_avg).toFixed(1) + ' מתוך 5'),
+      tile('שיעור תשובה', rate === null ? 'עוד לא נמדד' : fmtPct(rate), null, '', rate === null ? 'מונה ״נראה״ מהטלפון עוד כבוי' : a.prompted + ' תשובות מתוך ' + a.shown + ' הצגות')),
+    el('div', { class: 'grid2' },
+      card('לפי סוג', kinds.length ? table([{ t: 'סוג' }, { t: 'דיווחים', n: 1 }, { t: 'ממוצע', n: 1 }, { t: '1', n: 1 }, { t: '2', n: 1 }, { t: '3', n: 1 }, { t: '4', n: 1 }, { t: '5', n: 1 }],
+        kinds.map((k) => ({ cells: [lab(FB_KIND, k.kind), k.n, k.rating_avg === null || k.rating_avg === undefined ? '—' : Number(k.rating_avg).toFixed(1), ...(Array.isArray(k.dist) ? k.dist : [0, 0, 0, 0, 0])] })))
+        : el('p', { class: 'small' }, 'עוד אין דיווחים.')),
+      notesCard(notes)),
+    el('h3', { class: 'sec' }, 'דיווחי AI וקהילה'),
   ];
 }
 function feedbackTab(d, state) {
   return [
     sinceNote(d, state.period),
+    ...appFeedbackView(d.app_feedback, state.notes),
     el('div', { class: 'tiles' }, tile('בקשות פתוחות', String(d.requests_open)), tile('דיווחי קהילה', String(d.community_reports))),
     el('div', { class: 'grid2' },
       card('דיווחי AI לפי סוג ומודל', table([{ t: 'סוג' }, { t: 'מודל' }, { t: 'מספר', n: 1 }], d.ai_reports.map((r) => ({ cells: [lab(KIND, r.kind), r.model, r.n] }))),
@@ -344,6 +411,10 @@ async function refresh() {
     state.glance = await loadData('glance', 7);
     state.month = monthOf(state.glance.generated_at);
     state.tabData = await loadData(state.tab, state.period);
+    state.notes = null;
+    if (state.tab === 'feedback') { // the texts are a separate fetch; a failure here shows a line in their card and nothing else
+      try { state.notes = await loadData('feedback_notes', 0); } catch (e) { state.notes = { error: e }; }
+    }
     if (state.tab === 'money' && !state.fixedLoaded) { state.fixed = state.tabData.fixed_costs; state.fixedLoaded = true; }
     else if (!state.fixedLoaded) { state.fixed = (await loadData('money', 7)).fixed_costs; state.fixedLoaded = true; }
     state.error = null;
@@ -377,7 +448,7 @@ function render() {
     el('div', { class: 'tiles' },
       tile('עלות AI היום', fmtUsd(g.cost_today_usd), ratioV === null ? null : 'פי ' + ratioV.toFixed(1) + ' מהממוצע השבועי', ratioV >= 2 ? 'up-bad' : 'flat', 'ממוצע 7 ימים: ' + (g.cost_avg7_usd === null ? '—' : fmtUsd(g.cost_avg7_usd))),
       tile('הוצאות החודש', fmtUsd(g.spend_month.ai_usd + fixedNow), null, '', 'AI ' + fmtUsd(g.spend_month.ai_usd) + ' + קבוע ' + fmtUsd(fixedNow)),
-      tile('השתמשו ב־AI היום', String(g.ai_users_today), null, '', 'פעילים: בקרוב, שלב ב׳'),
+      tile('השתמשו ב־AI היום', String(g.ai_users_today), null, '', 'פעילים: בלשונית משתמשים'),
       tile('כישלונות 24 שעות', f.ai_pct + '%', null, '', `AI ${f.ai_calls} קריאות · תור ${f.queue_failed} · התראות ${f.push_undelivered}`)),
     el('div', { class: 'tabs', role: 'tablist' }, TABS.map(([k, t]) => el('button', { role: 'tab', type: 'button', 'aria-selected': k === state.tab, on: { click: () => { state.tab = k; refresh(); } } }, t))),
     el('div', { class: 'filters' }, 'תקופה:', [7, 30, 90].map((p) => el('button', { class: 'pill', type: 'button', 'aria-pressed': p === state.period, on: { click: () => { state.period = p; refresh(); } } }, p + ' ימים'))),

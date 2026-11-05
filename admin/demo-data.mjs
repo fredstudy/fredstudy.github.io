@@ -51,7 +51,7 @@ export function demoNow() {
   return new Date(END + 14 * 3600000 + 5 * 60000).toISOString(); // 28.10 14:05 UTC
 }
 
-/** opts.fewUsers -> split null. section in glance|money|users|health|feedback. */
+/** opts.fewUsers -> split null. opts.stageA -> what the server answers before the first activity ping. section in glance|money|users|health|feedback. */
 export function demoData(section, days, opts = {}) {
   const n = Math.min(days, AVAILABLE);
   const dayList = last(B.days, n);
@@ -105,6 +105,16 @@ export function demoData(section, days, opts = {}) {
         { platform: 'android', app_version: '1.0.6', n: 21 },
         { platform: 'android', app_version: '1.0.4', n: 4 },
       ],
+      active: opts.stageA ? null : {
+        dau: last(B.aiUsers, n).map((v) => Math.round(v * 1.6)),
+        wau: last(B.aiUsers, n).map((v) => Math.round(v * 3)),
+        mau: last(B.aiUsers, n).map((v) => Math.round(v * 4.5)),
+      },
+      retention: opts.stageA ? [] : [
+        { week: '2026-09-27', size: 24, weeks: [100, 62.5, 50, 41.7] },
+        { week: '2026-10-04', size: 31, weeks: [100, 58.1, 45.2] },
+        { week: '2026-10-11', size: 18, weeks: [100, 66.7, null] },
+      ],
     };
   }
   if (section === 'health') {
@@ -125,6 +135,15 @@ export function demoData(section, days, opts = {}) {
         group: { sent: 61, undelivered: 2 },
       },
       server_events: { rate_limited: 12, push_row_failed: 9, pdf_unlock_failed: 6 },
+      refresh: {
+        ok: last(B.aiUsers, n).map((v) => (opts.stageA ? 0 : v)),
+        fail: last(B.reports, n).map((v) => (opts.stageA ? 0 : v)),
+        by_class: opts.stageA ? {} : { network: 7, auth: 3, moodle_blocked: 1 },
+      },
+      download: {
+        ok: last(B.aiUsers, n).map((v) => (opts.stageA ? 0 : v * 6)),
+        fail: last(B.reports, n).map((v) => (opts.stageA ? 0 : v * 2)),
+      },
     };
   }
   if (section === 'feedback') {
@@ -138,6 +157,25 @@ export function demoData(section, days, opts = {}) {
       reports_per_day: last(B.reports, n),
       requests_open: 4,
       community_reports: 2,
+      app_feedback: {
+        total: 17, users: 11, rating_avg: 3.8, prompted: 12, shown: opts.stageA ? 0 : 40,
+        by_kind: [
+          { kind: 'practice', n: 8, rating_avg: 3.6, dist: [1, 1, 2, 3, 1] },
+          { kind: 'podcast', n: 5, rating_avg: 4.2, dist: [0, 0, 1, 2, 2] },
+          { kind: 'fred', n: 3, rating_avg: 4.0, dist: [0, 0, 1, 1, 1] },
+          { kind: 'video', n: 1, rating_avg: 3.0, dist: [0, 0, 1, 0, 0] },
+        ],
+        config: { enabled: true, gap_days: 4, kind_days: 8, quiet_days: 30 },
+      },
+    };
+  }
+  if (section === 'feedback_notes') {
+    return {
+      recent_notes: [
+        { kind: 'practice', rating: 2, tags: ['unclear', 'off_material'], note: '(לדוגמה) השאלה השנייה לא קשורה למה שלמדנו', app_version: '1.0.3', day: '2026-10-31', name: '(לדוגמה) דני', track: 'פסיכולוגיה', year: 'שנה ב׳' },
+        { kind: 'podcast', rating: 5, tags: [], note: '(לדוגמה) הפרק היה נעים ופשוט', app_version: '1.0.3', day: '2026-10-30', name: '(לדוגמה) רוני', track: null, year: null },
+        { kind: 'profile', rating: null, tags: ['idea'], note: '(לדוגמה) אשמח שפרד יזכיר לי לחזור על חומר', app_version: '1.0.2', day: '2026-10-28', name: null, track: null, year: null },
+      ],
     };
   }
   throw new Error('unknown section');

@@ -127,6 +127,41 @@ export const EVENT = {
   podcast_extension_paused: 'הארכת פודקאסט הושהתה', blob_deleted: 'קובץ נמחק', sha1_collision: 'התנגשות sha1',
 };
 export const PLAT = { ios: 'iPhone', android: 'Android' };
+/** The closed list of refresh failure classes (spec 125.12). */
+export const FAIL_CLASS = { auth: 'התחברות', network: 'רשת', moodle_blocked: 'חסימה של האתר', parse: 'קריאה', other: 'אחר' };
+
+/** In-app feedback (spec 138): the closed lists of the server (app_feedback.kind and .tags). */
+export const FB_KIND = { practice: 'תרגול', podcast: 'פודקאסט', video: 'וידאו', fred: 'פרד', profile: 'פרופיל' };
+export const FB_TAG = {
+  unclear: 'לא היה ברור', off_material: 'לא מהחומר', slow: 'איטי', other: 'אחר', too_long: 'ארוך מדי',
+  voice: 'הקול', visuals: 'החזותי', wrong: 'שגוי', bug: 'באג', idea: 'רעיון',
+};
+/** Response rate of the feedback sheet in percent (sent / shown). null while nothing was counted as shown (the switch of the phone counters is off). */
+export function feedbackRate(prompted, shown) {
+  if (!Number.isFinite(prompted) || !Number.isFinite(shown) || shown <= 0) return null;
+  return (prompted / shown) * 100;
+}
+/** The one line under the feedback title: how often the sheet pops up, from config (gap_days, kind_days, quiet_days). */
+export function feedbackConfigLine(c) {
+  if (!c || c.enabled !== true) return 'החלון כבוי כרגע, ולכן לא קופץ לאף אחד.';
+  const n = (v) => (Number.isFinite(v) ? String(v) : '?');
+  return 'החלון קופץ לכל היותר פעם ב־' + n(c.gap_days) + ' ימים, אותו סוג רק אחרי ' + n(c.kind_days) + ' ימים, ואחרי שלוש סגירות ברצף הוא שותק ' + n(c.quiet_days) + ' ימים.';
+}
+
+/** Stickiness (spec 125.11): percent of the 30-day actives who came on the last day that has both numbers. null -> no such day. */
+export function stickiness(active) {
+  const dau = (active && active.dau) || [];
+  const mau = (active && active.mau) || [];
+  for (let i = Math.min(dau.length, mau.length) - 1; i >= 0; i--) {
+    if (dau[i] > 0 && mau[i] > 0) return (dau[i] / mau[i]) * 100;
+  }
+  return null;
+}
+/** True when one of the arrays holds a count above zero (the phone counters of stage B: all zeros until the switch is on). */
+export function anyCount(...arrays) {
+  return arrays.some((a) => Array.isArray(a) && a.some((v) => v > 0));
+}
+
 /** The Hebrew label of a server name, or the name itself when unknown (shown as text, never parsed). */
 export function label(map, k) {
   return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : String(k);
@@ -151,6 +186,27 @@ export function alertText(a) {
         Number.isFinite(a.threshold) ? 'סף ההתראה: $' + a.threshold : ''];
     case 'pdf_global': // 125.28
       return ['פתיחות PDF ב־24 שעות: ' + (v ?? '—') + '.', Number.isFinite(a.threshold) ? 'סף ההתראה: ' + a.threshold : ''];
+    case 'video_fail': // 117.27 §1: value = the number of failure events today
+      return ['סרטונים: ' + (v === null ? '' : v + ' ') + 'כשלים היום. פרטים בלוח.', ''];
+    case 'podcast_fail': // 140 §5.6: value = the number of podcast_job_failed events today
+      return ['פודקאסטים: ' + (v === null ? '' : v + ' ') + 'כשלים היום. פרטים בלוח.', ''];
+    case 'pdf_notice_due': // spec draft-pdf-server-read §8: value = accounts whose PDF files are deleted in about two months, the student notice not built
+      return ['יש ' + (v === null ? '' : v + ' ') + 'חשבונות שקבצי ה־PDF שלהם יימחקו בעוד חודשיים, וההודעה לסטודנט לפני המחיקה עוד לא בנויה. פרטים בלוח.', ''];
+    case 'job_input_old': // 128a §4.4: value = rows of text kept past the hour
+      return ['טקסט של ' + (v === null ? '' : v + ' ') + 'עבודות נשאר בשרת מעבר לשעה. פרטים בלוח.', ''];
+    case 'topic_map_fail': // 076 §16.12: value = failed topic_map jobs and phone notes today
+      return ['מפת נושאים: ' + (v === null ? '' : v + ' ') + 'כשלים היום. פרטים בלוח.', ''];
+    case 'anthropic_block': // 076 §16.12: value = billing blocks today
+      return ['Anthropic: נגמר הקרדיט. המפות נשמרות בלי שיבוץ. פרטים בלוח.', ''];
+    case 'ai_day_usd': // cost alert 490000: value = dollars of everybody today, threshold = admin_ai_day_alert_micro in dollars
+      return ['עלות AI של כל המשתמשים היום: ' + (v === null ? '—' : '$' + v.toFixed(2)) + '.',
+        Number.isFinite(a.threshold) ? 'סף ההתראה: $' + a.threshold : ''];
+    case 'ai_user_day_usd': // cost alert 490000: value = accounts over the line today (a count, never who)
+      return [(v === 1 ? 'חשבון אחד הוציא' : (v ?? '—') + ' חשבונות הוציאו') + ' היום על AI מעל סף ההתראה.',
+        Number.isFinite(a.threshold) ? 'סף ההתראה: $' + a.threshold + ' לחשבון' : ''];
+    case 'repeat_check': // cost alert 490000: value = failed repeat checks of the summarize and describe-image doors in the last hour
+      return ['בדיקת הבקשות החוזרות (סיכומים ותיאור תמונות) נכשלה ' + (v === null ? '' : v + ' ') + 'פעמים בשעה האחרונה.',
+        Number.isFinite(a.threshold) ? 'הסף: ' + a.threshold : ''];
     default:
       return [String(a && a.kind), ''];
   }
